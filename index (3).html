@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>EcoChain WebAR Science Game</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=Mitr:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+    <!-- MediaPipe Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            font-family: 'Mitr', 'Inter', sans-serif;
+            margin: 0;
+            overflow: hidden;
+            background: #0f172a;
+            color: white;
+            touch-action: none; /* Prevent scrolling on touch */
+        }
+
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+        }
+
+        #game-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 10;
+        }
+
+        #video-element {
+            display: none; /* Hidden, we draw it to canvas directly */
+        }
+
+        .ui-layer {
+            position: absolute;
+            z-index: 20;
+            pointer-events: none; /* Let clicks pass through to canvas */
+        }
+
+        .interactive-btn {
+            pointer-events: auto; /* Enable clicking on buttons */
+            transition: all 0.2s ease-in-out;
+        }
+
+        .interactive-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* Modal animations */
+        @keyframes popIn {
+            0% { transform: scale(0.8); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .animate-pop {
+            animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        /* Pulse animation for timer */
+        @keyframes urgentPulse {
+            0% { transform: scale(1); color: #ef4444; }
+            50% { transform: scale(1.1); color: #f87171; text-shadow: 0 0 10px #ef4444; }
+            100% { transform: scale(1); color: #ef4444; }
+        }
+        .timer-urgent {
+            animation: urgentPulse 1s infinite;
+        }
+    </style>
+</head>
+<body class="select-none">
+
+    
+    <!-- Video Element (Source for MediaPipe) -->
+    <video id="video-element" autoplay playsinline></video>
+    
+    <!-- Main Game Canvas -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- UI Overlay: Top Bar -->
+    <div class="ui-layer w-full p-4 flex justify-between items-start">
+        <div class="glass-panel rounded-2xl p-3 px-5 flex flex-col gap-1">
+            <h1 class="text-xl font-bold text-emerald-400 drop-shadow-md">EcoChain <span class="text-sm font-normal text-slate-300 ml-2 border-l border-slate-600 pl-2">ระดับ <span id="ui-level">1</span></span></h1>
+            <div class="flex gap-4 text-sm font-medium">
+                <div>คะแนน: <span id="ui-score" class="text-amber-300 text-lg font-bold">0</span></div>
+                <div>Combo: <span id="ui-combo" class="text-cyan-300">x0</span></div>
+            </div>
+        </div>
+
+        <div class="flex flex-col items-end gap-3">
+            <div class="glass-panel rounded-2xl p-3 px-6 text-center border-emerald-500/30">
+                <div class="text-xs text-slate-400 mb-1">เวลาที่เหลือ</div>
+                <div id="ui-timer" class="text-3xl font-bold text-white tracking-wider font-mono">60</div>
+            </div>
+            
+            <div class="flex gap-2">
+                <button id="btn-hint" class="interactive-btn glass-panel rounded-full w-12 h-12 flex items-center justify-center text-amber-300 hover:bg-amber-400/20 border-amber-500/30">
+                    <i class="fa-solid fa-lightbulb text-xl"></i>
+                </button>
+                <button id="btn-camera" class="interactive-btn glass-panel rounded-full w-12 h-12 flex items-center justify-center text-emerald-300 hover:bg-emerald-400/20 border-emerald-500/30">
+                    <i class="fa-solid fa-video text-xl" id="icon-camera"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- UI Overlay: Bottom Info -->
+    <div class="ui-layer bottom-4 w-full flex justify-center">
+        <div class="glass-panel rounded-full px-6 py-2 text-sm text-slate-200 flex items-center gap-3">
+            <div id="status-indicator" class="w-3 h-3 rounded-full bg-rose-500 animate-pulse"></div>
+            <span id="status-text">โหมดสัมผัส (กำลังโหลด AR...)</span>
+        </div>
+    </div>
+
+    <!-- UI Overlay: Hint Box -->
+    <div id="hint-box" class="ui-layer top-32 left-1/2 -translate-x-1/2 glass-panel rounded-xl p-4 hidden max-w-sm w-11/12 border-amber-500/50">
+        <div class="text-amber-400 font-bold mb-1"><i class="fa-solid fa-circle-info"></i> คำใบ้</div>
+        <div id="hint-text" class="text-sm text-slate-200">...</div>
+    </div>
+
+
+    <!-- Start Screen Modal -->
+    <div id="modal-start" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/90 backdrop-blur-sm transition-opacity">
+        <div class="glass-panel p-8 rounded-3xl max-w-md w-11/12 text-center border border-emerald-500/30 animate-pop">
+            <div class="w-20 h-20 mx-auto bg-gradient-to-br from-emerald-400 to-teal-500 rounded-2xl flex items-center justify-center text-4xl mb-6 shadow-lg shadow-emerald-500/20">
+                🌿
+            </div>
+            <h2 class="text-3xl font-bold text-white mb-2">EcoChain WebAR</h2>
+            <p class="text-slate-300 text-sm mb-6">เรียนรู้ระบบนิเวศและโซ่อาหารผ่านเทคโนโลยี AR<br>จีบนิ้ว (Pinch) หรือลากเพื่อจัดเรียงโซ่อาหารให้ถูกต้อง</p>
+            
+            <div class="bg-slate-800/50 rounded-xl p-4 text-left text-sm text-slate-300 mb-6 space-y-2">
+                <p><i class="fa-solid fa-clock text-cyan-400 w-5 text-center"></i> <strong>เวลา:</strong> 60 วินาที / ด่าน</p>
+                <p><i class="fa-solid fa-hand-pointer text-amber-400 w-5 text-center"></i> <strong>การควบคุม:</strong> กล้อง AR (จีบนิ้ว) หรือ สัมผัสหน้าจอ</p>
+            </div>
+
+            <button id="btn-start-game" class="w-full py-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold text-lg hover:from-emerald-600 hover:to-teal-600 shadow-xl transition-all active:scale-95">
+                <i class="fa-solid fa-play mr-2"></i> เริ่มเกมเลย!
+            </button>
+        </div>
+    </div>
+
+    <!-- Level Complete Modal (Explanation) -->
+    <div id="modal-level" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/90 backdrop-blur-sm hidden">
+        <div class="glass-panel p-6 sm:p-8 rounded-3xl max-w-lg w-11/12 text-center border border-emerald-500/50 animate-pop">
+            <div class="text-5xl mb-4">🌟</div>
+            <h2 class="text-2xl font-bold text-emerald-400 mb-2">ผ่านด่านสำเร็จ!</h2>
+            
+            <div class="grid grid-cols-2 gap-4 mb-6">
+                <div class="bg-slate-800/60 rounded-xl p-3 border border-slate-700">
+                    <div class="text-xs text-slate-400">คะแนนด่านนี้</div>
+                    <div id="level-score" class="text-xl font-bold text-amber-400">0</div>
+                </div>
+                <div class="bg-slate-800/60 rounded-xl p-3 border border-slate-700">
+                    <div class="text-xs text-slate-400">เวลาที่เหลือ</div>
+                    <div id="level-time" class="text-xl font-bold text-cyan-400">0s</div>
+                </div>
+            </div>
+
+            <div class="bg-emerald-900/30 rounded-xl p-4 text-left border border-emerald-500/30 mb-6">
+                <h3 class="text-emerald-300 font-bold mb-2 flex items-center"><i class="fa-solid fa-graduation-cap mr-2"></i> เกร็ดความรู้:</h3>
+                <p id="level-explanation" class="text-sm text-slate-200 leading-relaxed">...</p>
+            </div>
+
+            <button id="btn-next-level" class="w-full py-3 rounded-xl bg-emerald-500 text-white font-bold hover:bg-emerald-600 shadow-lg transition-all active:scale-95">
+                ด่านต่อไป <i class="fa-solid fa-arrow-right ml-1"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Timeout Modal -->
+    <div id="modal-timeout" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/90 backdrop-blur-sm hidden">
+        <div class="glass-panel p-8 rounded-3xl max-w-md w-11/12 text-center border border-rose-500/50 animate-pop">
+            <div class="text-5xl mb-4">⏰</div>
+            <h2 class="text-2xl font-bold text-rose-400 mb-2">หมดเวลา!</h2>
+            <p class="text-slate-300 text-sm mb-6">คุณจัดเรียงโซ่อาหารไม่ทันในเวลาที่กำหนด</p>
+            
+            <button id="btn-retry" class="w-full py-3 rounded-xl bg-gradient-to-r from-rose-500 to-pink-600 text-white font-bold hover:from-rose-600 hover:to-pink-700 shadow-lg transition-all active:scale-95">
+                <i class="fa-solid fa-rotate-right mr-2"></i> ลองใหม่อีกครั้ง
+            </button>
+        </div>
+    </div>
+
+    <!-- Final Victory Modal -->
+    <div id="modal-victory" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/95 backdrop-blur-md hidden">
+        <div class="glass-panel p-8 rounded-3xl max-w-md w-11/12 text-center border border-amber-400/50 animate-pop">
+            <div class="text-6xl mb-4 animate-bounce">🏆</div>
+            <h2 class="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-yellow-500 mb-2">All Clear!</h2>
+            <p class="text-emerald-300 text-sm mb-6">ยินดีด้วย! คุณเข้าใจระบบนิเวศอย่างสมบูรณ์แบบ</p>
+            
+            <div class="space-y-3 mb-8 text-left bg-slate-800/50 p-5 rounded-2xl">
+                <div class="flex justify-between items-center border-b border-slate-700 pb-2">
+                    <span class="text-slate-400">คะแนนรวม:</span>
+                    <span id="final-score" class="text-2xl font-bold text-amber-400">0</span>
+                </div>
+                <div class="flex justify-between items-center border-b border-slate-700 pb-2">
+                    <span class="text-slate-400">เวลาที่ใช้ทั้งหมด:</span>
+                    <span id="final-time" class="text-xl font-bold text-cyan-400">0s</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-slate-400">Max Combo:</span>
+                    <span id="final-combo" class="text-xl font-bold text-purple-400">x0</span>
+                </div>
+            </div>
+
+            <button id="btn-restart-game" class="w-full py-3 rounded-xl bg-amber-500 text-slate-900 font-bold hover:bg-amber-400 shadow-lg transition-all active:scale-95">
+                <i class="fa-solid fa-rotate mr-2"></i> เล่นใหม่อีกครั้ง
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. GAME DATA & LEVELS ---
+        const GAME_LEVELS = [
+            {
+                level: 1,
+                name: "ด่าน 1: ทุ่งหญ้า",
+                explanation: "ในทุ่งหญ้า หญ้าเป็น 'ผู้ผลิต' สร้างอาหารจากแสงอาทิตย์ ตั๊กแตนมากินหญ้าเป็น 'ผู้บริโภคพืช' จากนั้นนกมากินตั๊กแตนเป็น 'ผู้บริโภคสัตว์' ทำให้พลังงานถูกถ่ายทอดไปตามลำดับ",
+                chain: [
+                    { id: "grass", name: "หญ้า", role: "ผู้ผลิต", icon: "🌿", tip: "สร้างอาหารเองได้จากแสงแดด", correctIndex: 0 },
+                    { id: "grasshopper", name: "ตั๊กแตน", role: "ผู้บริโภคพืช", icon: "🦗", tip: "แมลงที่กินใบพืชเป็นอาหาร", correctIndex: 1 },
+                    { id: "bird", name: "นก", role: "ผู้บริโภคสัตว์", icon: "🐦", tip: "จับแมลงกินเพื่อความอยู่รอด", correctIndex: 2 }
+                ]
+            },
+            {
+                level: 2,
+                name: "ด่าน 2: สวนป่า",
+                explanation: "แครอท (ผู้ผลิต) ถูกกระต่าย (ผู้บริโภคอันดับ 1) กิน จากนั้นงู (ผู้บริโภคอันดับ 2) กินกระต่าย และเหยี่ยวซึ่งเป็นผู้ล่าสูงสุด (Apex Predator) จะล่าเหยื่ออย่างงูอีกทีเพื่อรักษาสมดุลธรรมชาติ",
+                chain: [
+                    { id: "carrot", name: "แครอท", role: "ผู้ผลิต", icon: "🥕", tip: "พืชที่สะสมอาหารไว้ที่ราก", correctIndex: 0 },
+                    { id: "rabbit", name: "กระต่าย", role: "ผู้บริโภคลำดับ 1", icon: "🐇", tip: "สัตว์กินพืชขนาดเล็ก", correctIndex: 1 },
+                    { id: "snake", name: "งู", role: "ผู้บริโภคลำดับ 2", icon: "🐍", tip: "สัตว์เลื้อยคลานนักล่า", correctIndex: 2 },
+                    { id: "hawk", name: "เหยี่ยว", role: "ผู้ล่าสูงสุด", icon: "🦅", tip: "นกนักล่าชั้นยอด", correctIndex: 3 }
+                ]
+            },
+            {
+                level: 3,
+                name: "ด่าน 3: ระบบนิเวศซับซ้อน",
+                explanation: "ระบบนิเวศนี้เริ่มต้นที่ดอกไม้ ผีเสื้อดูดน้ำหวาน กบกินผีเสื้อ งูกินกบ และนกฮูกเป็นนักล่ากลางคืนที่กินงู แสดงให้เห็นถึงสายใยอาหารที่ยาวและเชื่อมโยงกันมากขึ้น",
+                chain: [
+                    { id: "flower", name: "ดอกไม้", role: "ผู้ผลิต", icon: "🌸", tip: "แหล่งผลิตน้ำหวาน", correctIndex: 0 },
+                    { id: "butterfly", name: "ผีเสื้อ", role: "ผู้บริโภคลำดับ 1", icon: "🦋", tip: "แมลงดูดน้ำหวาน", correctIndex: 1 },
+                    { id: "frog", name: "กบ", role: "ผู้บริโภคลำดับ 2", icon: "🐸", tip: "สัตว์สะเทินน้ำสะเทินบกกินแมลง", correctIndex: 2 },
+                    { id: "snake2", name: "งู", role: "ผู้บริโภคลำดับ 3", icon: "🐍", tip: "ล่างูหรือสัตว์เล็กอื่นๆ", correctIndex: 3 },
+                    { id: "owl", name: "นกฮูก", role: "ผู้ล่าสูงสุด", icon: "🦉", tip: "นักล่าในยามวิกาล", correctIndex: 4 }
+                ]
+            }
+        ];
+
+        // --- 2. STATE MANAGEMENT ---
+        const GameState = {
+            levelIdx: 0,
+            score: 0,
+            scoreAtLevelStart: 0,
+            combo: 0,
+            maxCombo: 0,
+            
+            // Time
+            timer: 60,
+            totalTime: 0,
+            timerInterval: null,
+            isGameActive: false,
+            
+            // AR & Controls
+            arEnabled: false, // Default false until camera loads
+            arReady: false,
+            isPinching: false,
+            
+            // Graphics Elements
+            cards: [],
+            slots: [],
+            particles: [],
+            
+            // Dragging mechanics
+            draggedCard: null,
+            dragOffset: { x: 0, y: 0 },
+            
+            // Hand tracking data
+            handCursor: { x: 0, y: 0, active: false, pinching: false },
+            handLandmarks: null,
+            videoMetrics: { nw: 0, nh: 0, nx: 0, ny: 0 }
+        };
+
+        // UI Elements Cache
+        const UI = {
+            score: document.getElementById('ui-score'),
+            combo: document.getElementById('ui-combo'),
+            level: document.getElementById('ui-level'),
+            timer: document.getElementById('ui-timer'),
+            hintBox: document.getElementById('hint-box'),
+            hintText: document.getElementById('hint-text'),
+            statusText: document.getElementById('status-text'),
+            statusIndicator: document.getElementById('status-indicator'),
+            cameraBtnIcon: document.getElementById('icon-camera')
+        };
+
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        const videoElement = document.getElementById('video-element');
+
+        // --- 3. AUDIO SYNTHESIZER ---
+        const AudioSys = {
+            ctx: null,
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            },
+            playTone(freq, type, duration, vol=0.1) {
+                if(!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                
+                gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + duration);
+            },
+            sfxHover() { this.playTone(400, 'sine', 0.1, 0.05); },
+            sfxGrab() { this.playTone(300, 'square', 0.1, 0.1); },
+            sfxDrop() { this.playTone(200, 'square', 0.1, 0.1); },
+            sfxSuccess() { 
+                this.playTone(523.25, 'sine', 0.1, 0.1); // C5
+                setTimeout(() => this.playTone(659.25, 'sine', 0.2, 0.1), 100); // E5
+            },
+            sfxError() {
+                this.playTone(150, 'sawtooth', 0.2, 0.1);
+                setTimeout(() => this.playTone(120, 'sawtooth', 0.3, 0.1), 150);
+            },
+            sfxTick() { this.playTone(880, 'sine', 0.05, 0.05); }, // High tick
+            sfxWinLevel() {
+                [523.25, 659.25, 783.99, 1046.50].forEach((freq, i) => {
+                    setTimeout(() => this.playTone(freq, 'sine', 0.3, 0.1), i * 150);
+                });
+            },
+            sfxTimeUp() {
+                this.playTone(300, 'sawtooth', 0.5, 0.2);
+            }
+        };
+
+        // --- 4. GRAPHICS & RENDERING ---
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            recalculateLayout();
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        function recalculateLayout() {
+            if (GameState.cards.length === 0) return;
+            
+            const numSlots = GameState.slots.length;
+            const slotWidth = Math.min(120, (canvas.width * 0.8) / numSlots);
+            const slotSpacing = slotWidth + 20;
+            const startX = (canvas.width - (slotSpacing * numSlots - 20)) / 2;
+            const slotY = canvas.height - 180; // Bottom area
+
+            // Update slot positions
+            GameState.slots.forEach((slot, i) => {
+                slot.x = startX + (i * slotSpacing);
+                slot.y = slotY;
+                slot.w = slotWidth;
+                slot.h = slotWidth * 1.2;
+            });
+        }
+
+        class Card {
+            constructor(data, x, y) {
+                this.data = data;
+                this.x = x;
+                this.y = y;
+                this.w = 100;
+                this.h = 130;
+                this.targetX = x;
+                this.targetY = y;
+                this.lockedSlot = null; // index of slot if snapped
+                this.scale = 1;
+                this.isHovered = false;
+                this.isDragged = false;
+            }
+
+            draw(ctx) {
+                // Lerp position for smooth animation
+                this.x += (this.targetX - this.x) * 0.2;
+                this.y += (this.targetY - this.y) * 0.2;
+
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                
+                let currentScale = this.scale;
+                if (this.isDragged) currentScale = 1.1;
+                else if (this.isHovered && !this.lockedSlot) currentScale = 1.05;
+                
+                ctx.scale(currentScale, currentScale);
+
+                // Card background
+                ctx.fillStyle = this.lockedSlot !== null ? 'rgba(16, 185, 129, 0.9)' : 'rgba(30, 41, 59, 0.9)';
+                if (this.isDragged) ctx.fillStyle = 'rgba(56, 189, 248, 0.9)';
+                
+                ctx.beginPath();
+                ctx.roundRect(-this.w/2, -this.h/2, this.w, this.h, 15);
+                ctx.fill();
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = this.lockedSlot !== null ? '#34d399' : (this.isDragged ? '#7dd3fc' : '#475569');
+                ctx.stroke();
+
+                // Icon
+                ctx.font = '50px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(this.data.icon, 0, -10);
+
+                // Name
+                ctx.fillStyle = 'white';
+                ctx.font = 'bold 16px Mitr';
+                ctx.fillText(this.data.name, 0, 35);
+                
+                // Role (small)
+                ctx.fillStyle = '#cbd5e1';
+                ctx.font = '10px Mitr';
+                ctx.fillText(this.data.role, 0, 50);
+
+                ctx.restore();
+            }
+
+            isPointInside(px, py) {
+                return px >= this.x - this.w/2 && px <= this.x + this.w/2 &&
+                       py >= this.y - this.h/2 && py <= this.y + this.h/2;
+            }
+        }
+
+        function createParticles(x, y, color) {
+            for(let i=0; i<15; i++) {
+                GameState.particles.push({
+                    x: x, y: y,
+                    vx: (Math.random() - 0.5) * 10,
+                    vy: (Math.random() - 0.5) * 10,
+                    life: 1.0,
+                    color: color
+                });
+            }
+        }
+
+        function updateAndDrawParticles(ctx) {
+            for(let i = GameState.particles.length - 1; i >= 0; i--) {
+                let p = GameState.particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= 0.02;
+                if(p.life <= 0) {
+                    GameState.particles.splice(i, 1);
+                    continue;
+                }
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 4 * p.life, 0, Math.PI*2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1.0;
+        }
+
+        // --- 5. MEDIAPIPE & AR CAMERA ---
+        const hands = new Hands({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }});
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
+
+        hands.onResults((results) => {
+            if (!GameState.arReady) {
+                GameState.arReady = true;
+                updateStatusUI();
+            }
+            GameState.handLandmarks = results;
+        });
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                if (GameState.arEnabled) {
+                    await hands.send({image: videoElement});
+                }
+            },
+            width: 1280,
+            height: 720
+        });
+
+        async function toggleCamera() {
+            if (!GameState.arEnabled) {
+                // พยายามเปิดกล้อง
+                GameState.arEnabled = true;
+                UI.cameraBtnIcon.classList.replace('fa-video-slash', 'fa-video');
+                UI.cameraBtnIcon.parentElement.classList.add('bg-emerald-500/20');
+                updateStatusUI(); // อัปเดตสถานะเป็น "กำลังโหลด..."
+
+                try {
+                    await camera.start();
+                } catch (error) {
+                    console.error("Camera access denied or failed:", error);
+                    
+                    // หากผู้ใช้ไม่อนุญาต หรือเกิดข้อผิดพลาด ให้กลับไปใช้โหมดสัมผัส (Fallback)
+                    GameState.arEnabled = false;
+                    GameState.arReady = false;
+                    UI.cameraBtnIcon.classList.replace('fa-video', 'fa-video-slash');
+                    UI.cameraBtnIcon.parentElement.classList.remove('bg-emerald-500/20');
+                    updateStatusUI();
+                    
+                    // แสดงแจ้งเตือนในเกมอย่างเป็นมิตร (ไม่ใช้ alert)
+                    UI.hintText.textContent = "⚠️ ไม่สามารถเข้าถึงกล้องได้ ระบบจะใช้ 'โหมดสัมผัส' แทน";
+                    UI.hintBox.classList.remove('hidden');
+                    setTimeout(() => UI.hintBox.classList.add('hidden'), 4000);
+                }
+            } else {
+                // ปิดกล้อง
+                GameState.arEnabled = false;
+                GameState.arReady = false;
+                GameState.handLandmarks = null;
+                camera.stop();
+                UI.cameraBtnIcon.classList.replace('fa-video', 'fa-video-slash');
+                UI.cameraBtnIcon.parentElement.classList.remove('bg-emerald-500/20');
+                updateStatusUI();
+            }
+        }
+
+        function updateStatusUI() {
+            if (GameState.arEnabled && GameState.arReady) {
+                UI.statusText.textContent = "โหมด AR (ใช้มือเท่านั้น)";
+                UI.statusIndicator.className = "w-3 h-3 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]";
+            } else if (GameState.arEnabled && !GameState.arReady) {
+                UI.statusText.textContent = "กำลังโหลดกล้อง...";
+                UI.statusIndicator.className = "w-3 h-3 rounded-full bg-amber-500 animate-pulse";
+            } else {
+                UI.statusText.textContent = "โหมดสัมผัส / เมาส์";
+                UI.statusIndicator.className = "w-3 h-3 rounded-full bg-cyan-500";
+            }
+        }
+
+        document.getElementById('btn-camera').addEventListener('click', () => {
+            AudioSys.init();
+            AudioSys.sfxHover();
+            toggleCamera();
+        });
+
+        // --- 6. GESTURE & DRAG LOGIC ---
+        function processHandGestures() {
+            if (!GameState.arEnabled || !GameState.arReady || !GameState.handLandmarks) return;
+            
+            const results = GameState.handLandmarks;
+            
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                
+                const thumbTip = landmarks[4];
+                const indexTip = landmarks[8];
+                const wrist = landmarks[0];
+                
+                // --- AR ALIGNMENT FIX ---
+                // นำค่าขนาดและ Offset ของวิดีโอที่แสดงจริงบน Canvas มาคำนวณ
+                const { nw, nh, nx, ny } = GameState.videoMetrics;
+                
+                // แปลงพิกัด (0-1) ของ MediaPipe ให้สอดคล้องกับวิดีโอที่ถูกขยาย (Crop & Scale)
+                // แกน X ถูกกลับ (Mirrored) ให้ตรงกับการวาดวิดีโอแบบกระจกเงา
+                const handX = canvas.width - (nx + (indexTip.x * nw)); 
+                const handY = ny + (indexTip.y * nh);
+                
+                // Calculate distance for pinch detection (using 3D coordinates for robustness)
+                const dx = thumbTip.x - indexTip.x;
+                const dy = thumbTip.y - indexTip.y;
+                const dz = thumbTip.z - indexTip.z;
+                const pinchDist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+                
+                // Use relative size of hand to determine pinch threshold
+                const handDx = wrist.x - indexTip.x;
+                const handDy = wrist.y - indexTip.y;
+                const handSize = Math.sqrt(handDx*handDx + handDy*handDy);
+                const isPinching = (pinchDist / handSize) < 0.25;
+
+                GameState.handCursor.x = handX;
+                GameState.handCursor.y = handY;
+                GameState.handCursor.active = true;
+                
+                handleInput(handX, handY, isPinching, true); // true = from AR
+                GameState.handCursor.pinching = isPinching;
+            } else {
+                GameState.handCursor.active = false;
+                if (GameState.draggedCard) {
+                    handleRelease(); // Drop if hand lost
+                }
+            }
+        }
+
+        // Shared input logic for both Mouse/Touch and AR Hand
+        function handleInput(x, y, isPressing, isFromAR) {
+            // STRICT AR MODE: If AR is enabled and ready, ignore mouse/touch
+            if (GameState.arEnabled && GameState.arReady && !isFromAR) {
+                return; 
+            }
+
+            // Hover state
+            let hoveredCard = null;
+            GameState.cards.forEach(card => {
+                if(card.lockedSlot === null) card.isHovered = false;
+                if (card.isPointInside(x, y) && card.lockedSlot === null) {
+                    card.isHovered = true;
+                    hoveredCard = card;
+                }
+            });
+
+            // Grab
+            if (isPressing && !GameState.isPinching && !GameState.draggedCard && hoveredCard) {
+                GameState.draggedCard = hoveredCard;
+                GameState.dragOffset.x = x - hoveredCard.x;
+                GameState.dragOffset.y = y - hoveredCard.y;
+                GameState.draggedCard.isDragged = true;
+                AudioSys.sfxGrab();
+            }
+
+            // Drag
+            if (isPressing && GameState.draggedCard) {
+                GameState.draggedCard.targetX = x - GameState.dragOffset.x;
+                GameState.draggedCard.targetY = y - GameState.dragOffset.y;
+            }
+
+            // Drop
+            if (!isPressing && GameState.isPinching && GameState.draggedCard) {
+                handleRelease();
+            }
+
+            GameState.isPinching = isPressing;
+        }
+
+        function handleRelease() {
+            if (!GameState.draggedCard) return;
+
+            const card = GameState.draggedCard;
+            card.isDragged = false;
+            let snapped = false;
+
+            // Check collision with slots
+            for (let i = 0; i < GameState.slots.length; i++) {
+                const slot = GameState.slots[i];
+                const dx = card.x - slot.x;
+                const dy = card.y - slot.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+
+                if (dist < 60 && !slot.occupied) {
+                    // Check if correct index
+                    if (card.data.correctIndex === i) {
+                        // Success!
+                        card.targetX = slot.x;
+                        card.targetY = slot.y;
+                        card.lockedSlot = i;
+                        slot.occupied = true;
+                        snapped = true;
+                        
+                        GameState.combo++;
+                        if(GameState.combo > GameState.maxCombo) GameState.maxCombo = GameState.combo;
+                        GameState.score += (100 * GameState.combo);
+                        
+                        AudioSys.sfxSuccess();
+                        createParticles(slot.x, slot.y, '#34d399');
+                        updateScoreUI();
+                        checkWinCondition();
+                    } else {
+                        // Wrong slot
+                        GameState.combo = 0;
+                        AudioSys.sfxError();
+                        createParticles(slot.x, slot.y, '#ef4444');
+                        updateScoreUI();
+                    }
+                    break;
+                }
+            }
+
+            if (!snapped) {
+                // Return to original spawn area if not snapped or wrong
+                card.targetX = Math.random() * (canvas.width - 200) + 100;
+                card.targetY = Math.random() * (canvas.height/2 - 100) + 100;
+                AudioSys.sfxDrop();
+            }
+
+            GameState.draggedCard = null;
+        }
+
+        // Mouse & Touch Event Listeners (Fallback)
+        canvas.addEventListener('mousedown', (e) => handleInput(e.clientX, e.clientY, true, false));
+        canvas.addEventListener('mousemove', (e) => handleInput(e.clientX, e.clientY, GameState.isPinching, false));
+        window.addEventListener('mouseup', () => handleInput(0, 0, false, false));
+
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            handleInput(e.touches[0].clientX, e.touches[0].clientY, true, false);
+        }, {passive: false});
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            handleInput(e.touches[0].clientX, e.touches[0].clientY, true, false);
+        }, {passive: false});
+        window.addEventListener('touchend', () => handleInput(0, 0, false, false));
+
+        // --- 7. GAME LOOP & TIMERS ---
+        function drawLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Video Background if AR is on
+            if (GameState.arEnabled && GameState.arReady && videoElement.videoWidth > 0) {
+                // คำนวณสัดส่วนวิดีโอให้เต็มจอแบบ object-fit: cover
+                const ratio = Math.max(canvas.width / videoElement.videoWidth, canvas.height / videoElement.videoHeight);
+                const nw = videoElement.videoWidth * ratio;
+                const nh = videoElement.videoHeight * ratio;
+                const nx = (canvas.width - nw) / 2;
+                const ny = (canvas.height - nh) / 2;
+                
+                // บันทึกค่า Metrics เพื่อนำไปคำนวณตำแหน่ง Cursor ใน processHandGestures
+                GameState.videoMetrics = { nw, nh, nx, ny };
+
+                ctx.save();
+                // พลิกหน้าจอเป็นกระจกเงา (Mirror) ให้สัมพันธ์กับการเคลื่อนไหวมือ
+                ctx.translate(canvas.width, 0);
+                ctx.scale(-1, 1);
+                // วาดวิดีโอจัดกึ่งกลางและตัดขอบที่เกินออก
+                ctx.drawImage(videoElement, nx, ny, nw, nh);
+                ctx.restore();
+                
+                // Darken video slightly
+                ctx.fillStyle = 'rgba(15, 23, 42, 0.4)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
+            if (GameState.isGameActive) {
+                // Draw Connections (Arrows between slots)
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+                ctx.lineWidth = 4;
+                ctx.setLineDash([10, 10]);
+                ctx.beginPath();
+                for (let i = 0; i < GameState.slots.length - 1; i++) {
+                    ctx.moveTo(GameState.slots[i].x + GameState.slots[i].w/2, GameState.slots[i].y);
+                    ctx.lineTo(GameState.slots[i+1].x - GameState.slots[i+1].w/2, GameState.slots[i+1].y);
+                }
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Draw Slots
+                GameState.slots.forEach((slot, i) => {
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+                    ctx.strokeStyle = slot.occupied ? '#34d399' : 'rgba(148, 163, 184, 0.5)';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.roundRect(slot.x - slot.w/2, slot.y - slot.h/2, slot.w, slot.h, 15);
+                    ctx.fill();
+                    ctx.stroke();
+                    
+                    // Slot label
+                    ctx.fillStyle = 'rgba(148, 163, 184, 0.8)';
+                    ctx.font = '12px Mitr';
+                    ctx.textAlign = 'center';
+                    let label = i === 0 ? "ผู้ผลิต" : `ผู้บริโภค ${i}`;
+                    ctx.fillText(label, slot.x, slot.y + slot.h/2 + 20);
+                });
+
+                // Draw Cards
+                // Draw non-dragged first, then dragged on top
+                GameState.cards.filter(c => !c.isDragged).forEach(card => card.draw(ctx));
+                GameState.cards.filter(c => c.isDragged).forEach(card => card.draw(ctx));
+
+                // Draw Particles
+                updateAndDrawParticles(ctx);
+
+                // Draw Hand Landmark & Cursor (Only if AR)
+                processHandGestures();
+                if (GameState.arEnabled && GameState.arReady && GameState.handLandmarks && GameState.handLandmarks.multiHandLandmarks) {
+                    ctx.save();
+                    ctx.globalAlpha = 0.5;
+                    const { nw, nh, nx, ny } = GameState.videoMetrics;
+                    
+                    for (const landmarks of GameState.handLandmarks.multiHandLandmarks) {
+                        // วาดโครงสร้างมือ (Skeleton) โดยคำนวณตำแหน่งให้ตรงกับวิดีโอเป๊ะๆ
+                        if (typeof HAND_CONNECTIONS !== 'undefined') {
+                            ctx.strokeStyle = '#10b981';
+                            ctx.lineWidth = 2;
+                            ctx.beginPath();
+                            for (const [startIdx, endIdx] of HAND_CONNECTIONS) {
+                                const start = landmarks[startIdx];
+                                const end = landmarks[endIdx];
+                                ctx.moveTo(canvas.width - (nx + start.x * nw), ny + start.y * nh);
+                                ctx.lineTo(canvas.width - (nx + end.x * nw), ny + end.y * nh);
+                            }
+                            ctx.stroke();
+                        }
+                        
+                        // วาดจุดข้อมือและปลายนิ้วต่างๆ
+                        ctx.fillStyle = '#34d399';
+                        for (const mark of landmarks) {
+                            ctx.beginPath();
+                            ctx.arc(canvas.width - (nx + mark.x * nw), ny + mark.y * nh, 3, 0, 2 * Math.PI);
+                            ctx.fill();
+                        }
+                    }
+                    ctx.restore();
+                }
+
+                // Draw custom hand cursor
+                if (GameState.handCursor.active) {
+                    ctx.beginPath();
+                    ctx.arc(GameState.handCursor.x, GameState.handCursor.y, GameState.handCursor.pinching ? 15 : 25, 0, Math.PI*2);
+                    ctx.fillStyle = GameState.handCursor.pinching ? 'rgba(52, 211, 153, 0.5)' : 'rgba(255, 255, 255, 0.3)';
+                    ctx.fill();
+                    ctx.lineWidth = 3;
+                    ctx.strokeStyle = GameState.handCursor.pinching ? '#10b981' : 'white';
+                    ctx.stroke();
+                }
+            }
+
+            requestAnimationFrame(drawLoop);
+        }
+
+        // Timer Logic
+        function startTimer() {
+            clearInterval(GameState.timerInterval);
+            GameState.timer = 60;
+            updateTimerUI();
+            
+            UI.timer.classList.remove('timer-urgent');
+
+            GameState.timerInterval = setInterval(() => {
+                if (!GameState.isGameActive) return;
+                
+                GameState.timer--;
+                GameState.totalTime++;
+                updateTimerUI();
+
+                if (GameState.timer <= 10 && GameState.timer > 0) {
+                    AudioSys.sfxTick();
+                    if (!UI.timer.classList.contains('timer-urgent')) {
+                        UI.timer.classList.add('timer-urgent');
+                    }
+                }
+
+                if (GameState.timer <= 0) {
+                    clearInterval(GameState.timerInterval);
+                    handleTimeOut();
+                }
+            }, 1000);
+        }
+
+        function updateTimerUI() {
+            UI.timer.textContent = GameState.timer;
+        }
+
+        function updateScoreUI() {
+            UI.score.textContent = GameState.score;
+            UI.combo.textContent = `x${GameState.combo}`;
+        }
+
+        // --- 8. LEVEL MANAGEMENT & FLOW ---
+        function startLevel(idx) {
+            GameState.levelIdx = idx;
+            const levelData = GAME_LEVELS[idx];
+            
+            GameState.scoreAtLevelStart = GameState.score; // Save state for retry
+            GameState.combo = 0;
+            updateScoreUI();
+            
+            UI.level.textContent = levelData.level;
+            
+            // Generate Slots
+            GameState.slots = levelData.chain.map(() => ({ occupied: false, x:0, y:0, w:0, h:0 }));
+            
+            // Generate Cards (Shuffle positions)
+            GameState.cards = [];
+            levelData.chain.forEach((item) => {
+                const startX = Math.random() * (canvas.width - 200) + 100;
+                const startY = Math.random() * (canvas.height/2 - 100) + 100;
+                GameState.cards.push(new Card(item, startX, startY));
+            });
+
+            // Shuffle array
+            GameState.cards.sort(() => Math.random() - 0.5);
+
+            recalculateLayout();
+            GameState.isGameActive = true;
+            startTimer();
+        }
+
+        function checkWinCondition() {
+            const allSnapped = GameState.slots.every(slot => slot.occupied);
+            if (allSnapped) {
+                GameState.isGameActive = false;
+                clearInterval(GameState.timerInterval);
+                AudioSys.sfxWinLevel();
+                
+                setTimeout(() => {
+                    const levelData = GAME_LEVELS[GameState.levelIdx];
+                    document.getElementById('level-score').textContent = GameState.score - GameState.scoreAtLevelStart;
+                    document.getElementById('level-time').textContent = GameState.timer + 's';
+                    document.getElementById('level-explanation').textContent = levelData.explanation;
+                    document.getElementById('modal-level').classList.remove('hidden');
+                }, 1000);
+            }
+        }
+
+        function handleTimeOut() {
+            GameState.isGameActive = false;
+            AudioSys.sfxTimeUp();
+            document.getElementById('modal-timeout').classList.remove('hidden');
+        }
+
+        // Hint System
+        document.getElementById('btn-hint').addEventListener('click', () => {
+            AudioSys.init();
+            AudioSys.sfxHover();
+            if (!GameState.isGameActive) return;
+            
+            // Find first unsnapped correct card
+            const levelData = GAME_LEVELS[GameState.levelIdx];
+            for (let i = 0; i < GameState.slots.length; i++) {
+                if (!GameState.slots[i].occupied) {
+                    const targetCardData = levelData.chain[i];
+                    UI.hintText.textContent = `มองหา: ${targetCardData.name} - ${targetCardData.tip}`;
+                    UI.hintBox.classList.remove('hidden');
+                    
+                    // Highlight the card slightly
+                    const cardObj = GameState.cards.find(c => c.data.id === targetCardData.id);
+                    if(cardObj) {
+                        createParticles(cardObj.x, cardObj.y, '#fbbf24');
+                    }
+                    
+                    setTimeout(() => UI.hintBox.classList.add('hidden'), 4000);
+                    break;
+                }
+            }
+        });
+
+        // Button Listeners
+        document.getElementById('btn-start-game').addEventListener('click', () => {
+            AudioSys.init();
+            AudioSys.sfxSuccess();
+            document.getElementById('modal-start').classList.add('hidden');
+            resizeCanvas();
+            startLevel(0);
+            
+            // Try open camera by default on start
+            if(!GameState.arEnabled) toggleCamera();
+        });
+
+        document.getElementById('btn-next-level').addEventListener('click', () => {
+            AudioSys.sfxHover();
+            document.getElementById('modal-level').classList.add('hidden');
+            if (GameState.levelIdx + 1 < GAME_LEVELS.length) {
+                startLevel(GameState.levelIdx + 1);
+            } else {
+                // Game Clear!
+                document.getElementById('final-score').textContent = GameState.score;
+                document.getElementById('final-time').textContent = GameState.totalTime + 's';
+                document.getElementById('final-combo').textContent = `x${GameState.maxCombo}`;
+                document.getElementById('modal-victory').classList.remove('hidden');
+                AudioSys.sfxWinLevel();
+            }
+        });
+
+        document.getElementById('btn-retry').addEventListener('click', () => {
+            AudioSys.sfxHover();
+            document.getElementById('modal-timeout').classList.add('hidden');
+            GameState.score = GameState.scoreAtLevelStart; // Reset score to what it was at start of level
+            startLevel(GameState.levelIdx);
+        });
+
+        document.getElementById('btn-restart-game').addEventListener('click', () => {
+            AudioSys.sfxHover();
+            document.getElementById('modal-victory').classList.add('hidden');
+            GameState.score = 0;
+            GameState.totalTime = 0;
+            GameState.maxCombo = 0;
+            startLevel(0);
+        });
+
+        // Initialize setup
+        resizeCanvas();
+        requestAnimationFrame(drawLoop);
+
+    </script>
+</body>
+</html>
